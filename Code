@@ -1,0 +1,104 @@
+## 
+
+
+library(Mcomp)
+library(forecast)
+library(tidyverse)
+
+data(M3)
+id=2334 
+
+inteira <- M3[[id]]
+horizonte <- M3[[id]]$h
+serie_temp <- M3[[id]]$x
+out_sample <- M3[[id]]$xx
+M3[[id]]$n
+
+####################################################################
+
+x <- diff(serie_temp) %>% diff(lag=12)
+
+# Modelo SARIMA(0,1,3)x(1,1,1)
+fit = Arima(serie_temp, order = c(0,1,3), seasonal = c(1,1,0))
+
+# Resíduos série Manual
+res_manual <- fit$residuals %>% window(start=c(1984,2))
+plot(res_manual)
+par(mfrow=c(1,3))
+plot(res_manual)
+qqnorm(res_manual); qqline(res_manual)
+acf(res_manual, lag.max = 12*5)
+
+# Resíduos série arima
+arima_serie <- auto.arima(serie_temp, stepwise = T, stationary = F)
+res_arima <- arima_serie$residuals %>% window(start=c(1984,2))
+par(mfrow=c(1,3))
+plot(res_arima)
+qqnorm(res_arima); qqline(res_arima)
+acf(res_arima, lag.max = 12*5)
+
+# Resíduos Prophet
+library(prophet)
+library(tsbox)
+df <- ts_df(serie_temp) %>%
+  rename(ds = time, y = value)
+
+model <- prophet(df)
+future <- make_future_dataframe(model, periods = horizonte, freq = "month")
+prev <- predict(model, future)
+summary(model)
+dyplot.prophet(model, prev)
+#
+valores <- c(inteira$x,inteira$xx)
+residuos <-  valores - prev$yhat
+residuos <- residuos[-c(1:13,117:134)]
+#
+res_Prophet <- ts(residuos, start = c(1984, 2), frequency = 12) 
+par(mfrow=c(1,3))
+plot(res_Prophet)
+qqnorm(res_Prophet); qqline(res_Prophet)
+acf(res_Prophet, lag.max = 12*5)
+
+
+####################################################################
+
+# verificando estacionariedade
+tseries::kpss.test(res_manual)
+tseries::kpss.test(res_arima)
+tseries::kpss.test(res_Prophet)
+
+# verificando independência
+#Box.test(res_manual,lag = 15, type = "Ljung-Box")
+Box.test(res_manual,lag = 20, type = "Ljung-Box")
+
+#Box.test(res_arima,lag = 15, type = "Ljung-Box")
+Box.test(res_arima,lag = 20, type = "Ljung-Box")
+
+#Box.test(res_Prophet,lag = 15, type = "Ljung-Box")
+Box.test(res_Prophet,lag = 20, type = "Ljung-Box")
+
+# Normalidade dos resíduos
+shapiro.test(res_manual)
+shapiro.test(res_arima)
+shapiro.test(res_Prophet)
+
+#Previsão
+par(mfrow=c(1,1))
+f = forecast(fit, horizonte)
+f %>% autoplot()
+
+g = forecast(arima_serie,horizonte)
+g %>% autoplot()
+
+# MAE
+prev_manual <- predict(fit,horizonte)$pred
+prev_arima <- predict(arima_serie, horizonte)$pred
+prev_prophet <- ts(prev$yhat[117:134],start = c(1992, 9), frequency = 12)
+
+mae_arima <- round(mean(abs(prev_arima - out_sample)),4)
+mae_manual <- round(mean(abs(prev_manual - out_sample)),4)
+mae_prophet <- round(mean(abs(prev_prophet - out_sample)),4)
+
+mape_arima <- round(mean(abs(prev_arima - out_sample)/out_sample),4)*100
+mape_manual <- round(mean(abs(prev_manual - out_sample)/out_sample),4)*100
+mape_prophet <- round(mean(abs(prev_prophet - out_sample)/out_sample),4)*100
